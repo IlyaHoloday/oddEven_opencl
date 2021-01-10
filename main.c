@@ -1,20 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #ifdef __APPLE__
-# include <OpenCL/opencl.h>      									 
+# include <OpenCL/opencl.h>      									 // для компьютеров на MacOsX
 #else
-# include <CL/cl.h>              									 
+#include <CL/cl.h>              									 // для компьютеров на Win\Linux указывайте путь к файлу cl.h
 #endif
-#define MAX_SRC_SIZE (0x100000)                                      // максимальный размер исходного кода кернеля
+#define MAX_SRC_SIZE (0x10000)                                      // максимальный размер исходного кода кернеля
 
 int 						main(void)
 {
 	int         			i;
-	const int   			arr_size = 10000000;                         // размер наших массивов
+	const int   			arr_size = 10000;                         // размер наших массивов
 	int         			*A;
 	int      				fd;
 	char     				*src_str;                            	 // сюда будет записан исходный код кернеля
 	size_t   				src_size;
+	char					vendor[1024];
+    char					device_name[1024];
+	cl_uint					num_cores;
 
 	cl_platform_id        	platform_id = NULL;    					 // обратите внимание на типы данных
 	cl_device_id          	device_id = NULL;
@@ -25,8 +29,7 @@ int 						main(void)
 	cl_context              context;
 	cl_command_queue        command_queue;
 
-	cl_mem         			a_mem_obj;           					 // опять, обратите внимание на тип данных
-	cl_mem         			b_mem_obj;           					 // все данные связанные с OpenCL имеют префикс cl_
+	cl_mem         			a_mem_obj;           					 
 
 	cl_program        		program;       							 // сюда будет записанна наша программа
 	cl_kernel         		kernel;        							 // сюда будет записан наш кернель
@@ -41,10 +44,10 @@ int 						main(void)
 	A = (int *)malloc(sizeof(int) * arr_size);						// выделяем место под массивы А и В
 	for(i = 0; i < arr_size; i++)                      				// наполняем массивы данными для отправки в кернель OpenCL
 	{
-		A[i] = 10000000 - i;
+		A[i] = 10000 - i;
 	}
 
-
+	clock_t begin = clock();
 	src_str = (char *)malloc(MAX_SRC_SIZE);       					// выделяем память для исходного кода
 	fd = open("OddEven.cl", "r");
 	if (fd <= 0)
@@ -57,7 +60,15 @@ int 						main(void)
 
 
 	ret = clGetPlatformIDs(1, &platform_id, &ret_num_platforms);
-	ret = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_GPU, 1, &device_id, &ret_num_devices);
+	ret = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &ret_num_devices);
+	clGetPlatformInfo(platform_id, CL_PLATFORM_VENDOR, sizeof(vendor), vendor, NULL);
+	clGetDeviceInfo(device_id, CL_DEVICE_NAME, sizeof(device_name), device_name, NULL);
+	clGetDeviceInfo(device_id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(num_cores), &num_cores, NULL);
+
+	//printf("-------------------------------------------------\n");
+	//printf("Vendor: %s\n", vendor);
+	//printf("Name: %s\n", device_name);
+	//printf("-------------------------------------------------\n");
 
 
 	context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
@@ -65,8 +76,6 @@ int 						main(void)
 
 
 	a_mem_obj = clCreateBuffer(context, CL_MEM_READ_WRITE,
-							   arr_size * sizeof(cl_int), NULL, &ret);
-	b_mem_obj = clCreateBuffer(context, CL_MEM_WRITE_ONLY,
 							   arr_size * sizeof(cl_int), NULL, &ret);
 
 
@@ -80,12 +89,12 @@ int 						main(void)
 	kernel = clCreateKernel(program, "odd", &ret);                            					 // создаём кернель
 	kernel_2 = clCreateKernel(program, "even", &ret);
 
-	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&a_mem_obj);  			
-	ret = clSetKernelArg(kernel_2, 0, sizeof(cl_mem), (void*)&a_mem_obj);//  			
+	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&a_mem_obj);  			// объект А
+	ret = clSetKernelArg(kernel_2, 0, sizeof(cl_mem), (void*)&a_mem_obj);//  			// объект В
 
 
 	NDRange = arr_size;
-	work_size = 1024;                 												// NDRange должен быть кратен размеру work-group
+	work_size = 256;                 												// NDRange должен быть кратен размеру work-group
 	for (int i = 0; i < arr_size/2; i++)
 	{
 		ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL,
@@ -102,8 +111,8 @@ int 						main(void)
 		arr_size * sizeof(int), A, 0, NULL, NULL);
 
 
-	for(i = 0; i < arr_size; i++)
-		printf("%d\n", A[i]);
+	//for(i = 0; i < arr_size; i++)
+	//	printf("%d\n", A[i]);
 
 
 	ret = clFlush(command_queue);                   // отчищаем очередь команд
@@ -114,6 +123,8 @@ int 						main(void)
 	ret = clReleaseCommandQueue(command_queue);     // удаляем очередь команд
 	ret = clReleaseContext(context);                // удаляем контекст OpenCL
 	free(A);                                        // удаляем локальный буфер А
+	clock_t end = clock();
+	printf("Elapsed: %f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);
 	
 	return(0);
 }
